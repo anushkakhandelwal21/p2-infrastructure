@@ -4,20 +4,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-RECORDS_DIR = Path("runs")
+BASE_DIR = Path(__file__).resolve().parent
+RECORDS_DIR = BASE_DIR / "runs"
 
 
 def save_run(data):
-    RECORDS_DIR.mkdir(exist_ok=True)
+    """
+    Save execution details as a JSON file.
+    Returns the path of the saved record.
+    """
+    RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(timezone.utc)
 
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp.isoformat(),
+        "status": data.get("status", "unknown"),
         "data": data
     }
 
-    filename = RECORDS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.json"
+    filename = RECORDS_DIR / (
+        f"run_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.json"
+    )
 
     with filename.open("w", encoding="utf-8") as file:
-        json.dump(record, file, indent=2)
+        json.dump(record, file, indent=2, ensure_ascii=False)
 
     return str(filename)
+
+
+def read_run(filepath):
+    """Read a saved execution record."""
+    path = Path(filepath)
+
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
