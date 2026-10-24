@@ -68,3 +68,69 @@ def run_gh_command(args, cwd=None, timeout=30):
             "return_code": -1
         }
 
+def create_pull_request(
+    title,
+    body,
+    head,
+    base="main",
+    repo="anushkakhandelwal21/p2-infrastructure",
+    draft=False
+):
+    """Create a GitHub pull request from an existing branch."""
+    if not all(isinstance(value, str) and value.strip()
+               for value in (title, body, head, base, repo)):
+        return {
+            "success": False,
+            "output": "",
+            "error": "Title, body, head, base, and repo are required.",
+            "return_code": -1
+        }
+
+    args = [
+        "pr", "create",
+        "--repo", repo,
+        "--title", title,
+        "--body", body,
+        "--head", head,
+        "--base", base
+    ]
+
+    if draft:
+        args.append("--draft")
+
+    return run_gh_command(args)
+
+
+def get_issue(issue_number, repo="anushkakhandelwal21/p2-infrastructure"):
+    """Fetch a GitHub issue's details without modifying the issue."""
+    try:
+        number = int(issue_number)
+        if number <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "output": "",
+            "error": "Issue number must be a positive integer.",
+            "return_code": -1
+        }
+
+    result = run_gh_command([
+        "issue", "view", str(number),
+        "--repo", repo,
+        "--json", "number,title,body,state,url,labels"
+    ])
+
+    if not result["success"]:
+        return result
+
+    import json
+
+    try:
+        issue_data = json.loads(result["output"])
+        result["issue"] = issue_data
+    except json.JSONDecodeError:
+        result["success"] = False
+        result["error"] = "Could not parse GitHub issue details."
+
+    return result
