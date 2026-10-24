@@ -1,5 +1,5 @@
 
-import json
+import ast
 import shutil
 import subprocess
 import sys
@@ -15,12 +15,12 @@ BACKUP_FILE = PROJECT_DIR / "demo_bug.py.backup"
 
 
 def apply_and_verify_fix(issue, test_output="", test_error=""):
-    """Apply an AI-proposed replacement to the demo file and verify it."""
+    """Apply an AI proposal to the demo file and verify it with tests."""
 
     if not TARGET_FILE.is_file() or not TEST_FILE.is_file():
         return {
             "success": False,
-            "message": "Demo source file or its test file was not found."
+            "message": "Demo source or focused test file not found."
         }
 
     original_code = TARGET_FILE.read_text(encoding="utf-8")
@@ -40,43 +40,50 @@ def apply_and_verify_fix(issue, test_output="", test_error=""):
         }
 
     parsed = diagnosis.get("parsed_analysis")
-
     if not isinstance(parsed, dict):
         return {
             "success": False,
-            "message": "AI did not return valid JSON. No changes applied."
+            "message": "AI response was not valid JSON."
         }
 
     proposed_fix = parsed.get("proposed_fix")
-
     if not isinstance(proposed_fix, dict):
         return {
             "success": False,
-            "message": "AI response has no valid proposed_fix. No changes applied."
+            "message": "AI did not provide a structured proposed fix."
         }
 
     new_code = proposed_fix.get("code")
-
     if not isinstance(new_code, str) or not new_code.strip():
         return {
             "success": False,
             "message": "AI did not provide replacement code."
         }
 
-    # Only allow the expected demo function in the replacement.
-    if "def calculate_average(" not in new_code:
+    try:
+        tree = ast.parse(new_code)
+    except SyntaxError as exc:
         return {
             "success": False,
-            "message": "Proposed code did not contain the expected function."
+            "message": "AI proposal has invalid Python syntax.",
+            "details": str(exc)
+        }
+
+    # Restrict the proposal to the expected function.
+    functions = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if len(functions) != 1 or functions[0].name != "calculate_average":
+        return {
+            "success": False,
+            "message": "Proposal must contain only calculate_average()."
         }
 
     if BACKUP_FILE.exists():
         return {
             "success": False,
-            "message": (
-                "A backup already exists. Review or rename "
-                "demo_bug.py.backup before trying again."
-            )
+            "message": "Backup already exists. Resolve it before retrying."
         }
 
     shutil.copy2(TARGET_FILE, BACKUP_FILE)
@@ -86,11 +93,8 @@ def apply_and_verify_fix(issue, test_output="", test_error=""):
 
         result = subprocess.run(
             [
-                sys.executable,
-                "-m",
-                "pytest",
-                str(TEST_FILE),
-                "-v"
+                sys.executable, "-m", "pytest",
+                str(TEST_FILE), "-v"
             ],
             cwd=str(PROJECT_DIR),
             capture_output=True,
@@ -103,31 +107,29 @@ def apply_and_verify_fix(issue, test_output="", test_error=""):
             BACKUP_FILE.unlink()
             return {
                 "success": True,
-                "message": "AI-proposed fix passed the focused tests.",
+                "message": "Proposed fix passed focused tests.",
                 "test_output": result.stdout,
                 "test_error": result.stderr,
                 "ai_analysis": parsed
             }
 
-        # Restore the original file if verification fails.
         shutil.copy2(BACKUP_FILE, TARGET_FILE)
-
         return {
             "success": False,
-            "message": "Tests failed. Original source file restored.",
+            "message": "Tests failed; original source restored.",
             "test_output": result.stdout,
             "test_error": result.stderr
         }
 
     except (OSError, subprocess.TimeoutExpired) as exc:
         shutil.copy2(BACKUP_FILE, TARGET_FILE)
-
         return {
             "success": False,
-            "message": "Fix verification failed. Original file restored.",
+            "message": "Verification failed; original source restored.",
             "details": type(exc).__name__
         }
 
     finally:
         if BACKUP_FILE.exists():
             BACKUP_FILE.unlink()
+
